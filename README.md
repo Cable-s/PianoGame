@@ -16,7 +16,7 @@ I am building a Unity based rhythm / music training game that connects a MIDI de
 5. Feedback is rendered visually and/or through scoring logic.
 
 ### Technical Architecture
-#### MIDI Layer
+#### MIDI Layer (in theory this layer is fully decoupled from Unity [although I do some Unity logging])
 - Native MIDI callback handling
 - Byte-level parsing of MIDI messages
 - Device selection support
