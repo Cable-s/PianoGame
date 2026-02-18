@@ -50,6 +50,7 @@
   <ItemGroup>
     <Compile Include="Assets\Scripts\Game\Manager\MusicFileSelector.cs" />
     <Compile Include="Assets\Scripts\Game\Manager\GameController.cs" />
+    <Compile Include="Assets\Scripts\Game\Manager\GrandStaffNoteRenderer.cs" />
     <Compile Include="Assets\Scripts\Game\Manager\Piano.cs" />
   </ItemGroup>
   <ItemGroup>
