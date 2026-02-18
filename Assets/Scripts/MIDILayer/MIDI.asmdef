@@ -1,0 +1,9 @@
+{
+	"name": "MIDI",
+	"precompiledReferences": [
+		"Melanchall.DryWetMidi.dll"
+	],
+	"autoReferenced": true,
+	"defineConstraints": [],
+	"versionDefines": []
+}

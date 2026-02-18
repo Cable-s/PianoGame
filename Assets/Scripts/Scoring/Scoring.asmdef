@@ -1,0 +1,17 @@
+{
+    "name": "Scoring",
+    "rootNamespace": "",
+    "references": [
+        "GUID:fcbf8308aac8fd4428441bab1d40a9b6",
+        "GUID:8292c23544894004e9a2ba1ee24fbd7e"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

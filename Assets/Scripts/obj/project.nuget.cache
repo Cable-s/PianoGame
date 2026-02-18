@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "dgSpecHash": "KLfhrjK5LpY=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Caleb\\PianoGame\\Assets\\Scripts\\PianoGame.Core.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Caleb\\.nuget\\packages\\melanchall.drywetmidi\\8.0.3\\melanchall.drywetmidi.8.0.3.nupkg.sha512",
+    "C:\\Users\\Caleb\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\6.0.36\\microsoft.aspnetcore.app.ref.6.0.36.nupkg.sha512",
+    "C:\\Users\\Caleb\\.nuget\\packages\\microsoft.netcore.app.ref\\6.0.36\\microsoft.netcore.app.ref.6.0.36.nupkg.sha512",
+    "C:\\Users\\Caleb\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\6.0.36\\microsoft.windowsdesktop.app.ref.6.0.36.nupkg.sha512"
+  ],
+  "logs": []
+}

@@ -1,0 +1,4 @@
+C:\Users\Caleb\PianoGame\Assets\Scripts\obj\Debug\net6.0\PianoGame.Core.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Caleb\PianoGame\Assets\Scripts\obj\Debug\net6.0\PianoGame.Core.AssemblyInfoInputs.cache
+C:\Users\Caleb\PianoGame\Assets\Scripts\obj\Debug\net6.0\PianoGame.Core.AssemblyInfo.cs
+C:\Users\Caleb\PianoGame\Assets\Scripts\obj\Debug\net6.0\PianoGame.Core.csproj.CoreCompileInputs.cache
