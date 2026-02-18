@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEngine;
-using UnityEngine.UI;
 using TMPro;
 using PianoGame.MIDI;
 using PianoGame.MusicXML;
@@ -16,6 +15,7 @@ public class GameController : MonoBehaviour
 {
   [SerializeField] private TMP_Text scoreDisplay; // Drag a Text UI element here
   [SerializeField] private TMP_Text nextNoteDisplay; // Drag another Text UI element here
+  [SerializeField] private GrandStaffNoteRenderer staffRenderer;
   [SerializeField] private string testMusicPath = "Assets/Music/MozaChloSample.musicxml"; // Path to test file
 
   private MusicXmlParser _parser;
@@ -46,6 +46,11 @@ public class GameController : MonoBehaviour
     {
       nextNoteDisplay = allTexts[1];
       Debug.Log($"[GAME] Found nextNoteDisplay: {(nextNoteDisplay != null ? nextNoteDisplay.name : "FAILED")}");
+    }
+
+    if (staffRenderer == null)
+    {
+      staffRenderer = FindObjectOfType<GrandStaffNoteRenderer>();
     }
   }
 
@@ -165,6 +170,14 @@ public class GameController : MonoBehaviour
     }
     else
       Debug.LogWarning("[GAME] nextNoteDisplay is null, cannot update!");
+
+    if (staffRenderer != null)
+    {
+      if (_currentNoteIndex < _expectedNotes.Count)
+        staffRenderer.ShowNextNote(_expectedNotes[_currentNoteIndex]);
+      else
+        staffRenderer.Clear();
+    }
 
     Debug.Log($"[GAME UI] {scoreText} | Next Note: {nextNote}");
   }
