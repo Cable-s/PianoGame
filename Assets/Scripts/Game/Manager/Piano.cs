@@ -65,6 +65,15 @@ public class Piano : MonoBehaviour
     Debug.Log("[MIDI] Play a note on your keyboard now!");
   }
 
+  private void Update()
+  {
+    // Dispatch any queued MIDI events on the main thread
+    if (MidiInputDevice != null)
+    {
+      MidiInputDevice.DispatchQueuedEvents();
+    }
+  }
+
   private void OnMidiEventReceived(object sender, MidiEvent midiEvent)
   {
     // Only process Note On events

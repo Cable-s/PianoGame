@@ -34,19 +34,17 @@ public class GameController : MonoBehaviour
     _noteMatcher = new NoteMatcher();
 
     // Auto-find TMP_Text fields if not assigned
-    if (scoreDisplay == null)
+    var allTexts = FindObjectsByType<TMP_Text>(FindObjectsSortMode.None);
+
+    if (scoreDisplay == null && allTexts.Length > 0)
     {
-      var allTexts = FindObjectsOfType<TMP_Text>();
-      if (allTexts.Length > 0)
-        scoreDisplay = allTexts[0];
+      scoreDisplay = allTexts[0];
       Debug.Log($"[GAME] Found scoreDisplay: {(scoreDisplay != null ? scoreDisplay.name : "FAILED")}");
     }
 
-    if (nextNoteDisplay == null)
+    if (nextNoteDisplay == null && allTexts.Length > 1)
     {
-      var allTexts = FindObjectsOfType<TMP_Text>();
-      if (allTexts.Length > 1)
-        nextNoteDisplay = allTexts[1];
+      nextNoteDisplay = allTexts[1];
       Debug.Log($"[GAME] Found nextNoteDisplay: {(nextNoteDisplay != null ? nextNoteDisplay.name : "FAILED")}");
     }
   }

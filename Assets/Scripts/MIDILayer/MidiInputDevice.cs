@@ -105,6 +105,7 @@ namespace PianoGame.MIDI
 
     void Open();
     void Close();
+    void DispatchQueuedEvents();
   }
 
   /// <summary>
@@ -124,6 +125,9 @@ namespace PianoGame.MIDI
     private IntPtr _headerPtr; // Unmanaged memory for header
     private MidiNative.MidiInputProc _midiCallback; // Keep delegate alive
     private Queue<MidiNative.MIDIHDR> _completedBuffers = new Queue<MidiNative.MIDIHDR>();
+
+    // Queue for events to be dispatched on main thread
+    private readonly ConcurrentQueue<MidiEvent> _eventQueue = new ConcurrentQueue<MidiEvent>();
 
     public event EventHandler<MidiEvent> EventReceived;
 
@@ -260,23 +264,23 @@ namespace PianoGame.MIDI
             {
               var noteOn = new NoteOnEvent(timestamp, channel, data1, data2);
               //UnityEngine.Debug.Log($"[MIDI] Note ON: Ch {channel}, Note {data1}, Vel {data2}");
-              EventReceived?.Invoke(this, noteOn);
+              _eventQueue.Enqueue(noteOn);
             }
             else if (statusType == 0x80 || (statusType == 0x90 && data2 == 0)) // Note Off
             {
               var noteOff = new NoteOffEvent(timestamp, channel, data1, data2);
               //UnityEngine.Debug.Log($"[MIDI] Note OFF: Ch {channel}, Note {data1}");
-              EventReceived?.Invoke(this, noteOff);
+              _eventQueue.Enqueue(noteOff);
             }
             else if (statusType == 0xB0) // Control Change
             {
               var cc = new ControlChangeEvent(timestamp, channel, data1, data2);
-              EventReceived?.Invoke(this, cc);
+              _eventQueue.Enqueue(cc);
             }
             else if (statusType == 0xC0) // Program Change
             {
               var pc = new ProgramChangeEvent(timestamp, channel, data1);
-              EventReceived?.Invoke(this, pc);
+              _eventQueue.Enqueue(pc);
             }
             break;
 
@@ -415,13 +419,13 @@ namespace PianoGame.MIDI
             {
               var noteOn = new NoteOnEvent(timestamp, channel, note, velocity);
               //UnityEngine.Debug.Log($"[MIDI] Note ON: Ch {channel}, Note {note}, Vel {velocity}");
-              EventReceived?.Invoke(this, noteOn);
+              _eventQueue.Enqueue(noteOn);
             }
             else
             {
               var noteOff = new NoteOffEvent(timestamp, channel, note, 0);
               //UnityEngine.Debug.Log($"[MIDI] Note OFF: Ch {channel}, Note {note}");
-              EventReceived?.Invoke(this, noteOff);
+              _eventQueue.Enqueue(noteOff);
             }
             i += 3;
           }
@@ -431,7 +435,7 @@ namespace PianoGame.MIDI
             byte velocity = _buffer[i + 2];
             var noteOff = new NoteOffEvent(timestamp, channel, note, velocity);
             //UnityEngine.Debug.Log($"[MIDI] Note OFF: Ch {channel}, Note {note}");
-            EventReceived?.Invoke(this, noteOff);
+            _eventQueue.Enqueue(noteOff);
             i += 3;
           }
           else if (statusType == 0xB0 && i + 2 < bytesRead) // Control Change
@@ -439,7 +443,7 @@ namespace PianoGame.MIDI
             byte controller = _buffer[i + 1];
             byte value = _buffer[i + 2];
             var cc = new ControlChangeEvent(timestamp, channel, controller, value);
-            EventReceived?.Invoke(this, cc);
+            _eventQueue.Enqueue(cc);
             i += 3;
           }
           else
@@ -452,6 +456,17 @@ namespace PianoGame.MIDI
           //UnityEngine.Debug.LogError($"[MIDI ERROR] Parse error: {ex.Message}");
           i++;
         }
+      }
+    }
+
+    /// <summary>
+    /// Dispatch all queued MIDI events. Call this from the main thread (e.g., from Unity Update).
+    /// </summary>
+    public void DispatchQueuedEvents()
+    {
+      while (_eventQueue.TryDequeue(out var midiEvent))
+      {
+        EventReceived?.Invoke(this, midiEvent);
       }
     }
 
