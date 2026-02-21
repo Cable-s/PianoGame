@@ -1,5 +1,5 @@
 ## MIDI music practice game
-I am building a Unity based rhythm / music training game that connects a MIDI device for a real-time feedback on performance. I wanted a way to practice sight reading. It is kinda like SimplyPiano, but for my desktop (and no payment plan...)
+I am building a Unity rhythm / music training game that connects a MIDI device for a real-time feedback on performance. I wanted a way to practice sight reading. It is kinda like SimplyPiano, but for my desktop (and no payment plan...)
 
 
 ### How It Works
