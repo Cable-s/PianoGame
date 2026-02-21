@@ -115,14 +115,16 @@ namespace PianoGame.MusicXML
 
         var measures = part.Elements().Where(e => e.Name.LocalName == "measure").ToList();
         double currentTime = 0;
-        int currentMeasure = 1;
+        double currentBeatGlobal = 0;
+        int sequentialMeasureNumber = 1;
         int numerator = 4, denominator = 4;
 
         foreach (var measure in measures)
         {
-          var measureObj = new Measure(currentMeasure, currentTime);
-          measureObj.Numerator = numerator;
-          measureObj.Denominator = denominator;
+          int measureNumber = sequentialMeasureNumber;
+          var numberAttr = measure.Attribute("number")?.Value;
+          if (!string.IsNullOrWhiteSpace(numberAttr) && int.TryParse(numberAttr, out int parsedNumber))
+            measureNumber = parsedNumber;
 
           // Parse time signature
           var attributesElem = measure.Element(measure.Name.NamespaceName + "attributes")
@@ -143,29 +145,74 @@ namespace PianoGame.MusicXML
             }
           }
 
+          var measureObj = new Measure(measureNumber, currentTime);
+          measureObj.Numerator = numerator;
+          measureObj.Denominator = denominator;
+
           // Parse notes in measure
-          var notes = measure.Elements().Where(e => e.Name.LocalName == "note").ToList();
-          double noteStartBeat = 0;
+          // MusicXML encodes polyphony (multiple voices/staves) via <backup>/<forward>.
+          // We need to respect those to get correct simultaneity.
+          double cursorDivisions = 0;
+          double maxCursorDivisions = 0;
 
-          foreach (var noteElem in notes)
+          foreach (var elem in measure.Elements())
           {
-            var note = ParseNote(noteElem, currentTime + (noteStartBeat * 60.0 / (score.Bpm * 4.0)));
-            note.StartBeat = noteStartBeat;
-
-            // Update beat position
-            var durationElem = noteElem.Elements().FirstOrDefault(e => e.Name.LocalName == "duration");
-            if (durationElem != null && int.TryParse(durationElem.Value, out int dur))
+            string name = elem.Name.LocalName;
+            if (name == "backup")
             {
-              noteStartBeat += (double)dur / score.Divisions;
+              var durElem = elem.Elements().FirstOrDefault(e => e.Name.LocalName == "duration");
+              if (durElem != null && int.TryParse(durElem.Value, out int dur))
+                cursorDivisions = Math.Max(0, cursorDivisions - dur);
+              continue;
             }
+            if (name == "forward")
+            {
+              var durElem = elem.Elements().FirstOrDefault(e => e.Name.LocalName == "duration");
+              if (durElem != null && int.TryParse(durElem.Value, out int dur))
+              {
+                cursorDivisions += dur;
+                maxCursorDivisions = Math.Max(maxCursorDivisions, cursorDivisions);
+              }
+              continue;
+            }
+            if (name != "note")
+              continue;
 
-            if (!note.IsRest)
-              measureObj.Notes.Add(note);
+            var noteElem = elem;
+            bool isChordTone = noteElem.Elements().Any(e => e.Name.LocalName == "chord");
+
+            // Start beat is the current cursor position (unless this is a chord tone).
+            double noteStartBeat = cursorDivisions / score.Divisions;
+
+            var note = ParseNote(noteElem, currentTime);
+            note.MeasureNumber = measureNumber;
+            note.StartBeat = noteStartBeat;
+            note.StartBeatGlobal = currentBeatGlobal + noteStartBeat;
+            note.StartTime = currentTime + (noteStartBeat * 60.0 / score.Bpm);
+
+            // Keep rests too so timing/rendering can remain faithful.
+            measureObj.Notes.Add(note);
+
+            // Advance cursor by note duration (unless chord tone).
+            var durationElem = noteElem.Elements().FirstOrDefault(e => e.Name.LocalName == "duration");
+            if (!isChordTone && durationElem != null && int.TryParse(durationElem.Value, out int durNote))
+            {
+              cursorDivisions += durNote;
+              maxCursorDivisions = Math.Max(maxCursorDivisions, cursorDivisions);
+            }
           }
 
+          double measureDurationBeats = maxCursorDivisions / score.Divisions;
+
           staff.Measures.Add(measureObj);
-          currentTime += measureObj.GetDuration(score.Bpm);
-          currentMeasure++;
+          // Advance time/beats based on the measure time signature (in quarter-note beats).
+          double measureBeats = measureDurationBeats;
+          if (measureBeats <= 0)
+            measureBeats = numerator * (4.0 / denominator);
+
+          currentBeatGlobal += measureBeats;
+          currentTime += measureBeats * (60.0 / score.Bpm);
+          sequentialMeasureNumber++;
         }
       }
     }
@@ -177,31 +224,37 @@ namespace PianoGame.MusicXML
       throw new NotImplementedException("Score-timewise parsing not yet implemented");
     }
 
-    private Note ParseNote(XElement noteElem, double startTime)
+    private Note ParseNote(XElement noteElem, double measureStartTime)
     {
-      var note = new Note { StartTime = startTime };
+      var note = new Note { StartTime = measureStartTime };
+
+      // Parse staff assignment (for multi-staff instruments like piano)
+      var staffElem = noteElem.Elements().FirstOrDefault(e => e.Name.LocalName == "staff")?.Value;
+      if (int.TryParse(staffElem, out int staffNumber))
+        note.StaffNumber = staffNumber;
 
       // Check if rest
       var restElem = noteElem.Elements().FirstOrDefault(e => e.Name.LocalName == "rest");
-      if (restElem != null)
-      {
+      bool isRest = restElem != null;
+      if (isRest)
         note.IsRest = true;
-        return note;
-      }
 
-      // Parse pitch
-      var pitchElem = noteElem.Elements().FirstOrDefault(e => e.Name.LocalName == "pitch");
-      if (pitchElem != null)
+      // Parse pitch (rests typically have no pitch)
+      if (!isRest)
       {
-        var stepElem = pitchElem.Elements().FirstOrDefault(e => e.Name.LocalName == "step");
-        var octaveElem = pitchElem.Elements().FirstOrDefault(e => e.Name.LocalName == "octave");
-        var alterElem = pitchElem.Elements().FirstOrDefault(e => e.Name.LocalName == "alter");
-
-        if (Enum.TryParse<Pitch.NoteName>(stepElem?.Value ?? "C", out var noteName))
+        var pitchElem = noteElem.Elements().FirstOrDefault(e => e.Name.LocalName == "pitch");
+        if (pitchElem != null)
         {
-          int octave = int.TryParse(octaveElem?.Value, out int o) ? o : 4;
-          int accidental = int.TryParse(alterElem?.Value, out int alt) ? alt : 0;
-          note.Pitch = new Pitch(noteName, octave, accidental);
+          var stepElem = pitchElem.Elements().FirstOrDefault(e => e.Name.LocalName == "step");
+          var octaveElem = pitchElem.Elements().FirstOrDefault(e => e.Name.LocalName == "octave");
+          var alterElem = pitchElem.Elements().FirstOrDefault(e => e.Name.LocalName == "alter");
+
+          if (Enum.TryParse<Pitch.NoteName>(stepElem?.Value ?? "C", out var noteName))
+          {
+            int octave = int.TryParse(octaveElem?.Value, out int o) ? o : 4;
+            int accidental = int.TryParse(alterElem?.Value, out int alt) ? alt : 0;
+            note.Pitch = new Pitch(noteName, octave, accidental);
+          }
         }
       }
 
@@ -209,12 +262,33 @@ namespace PianoGame.MusicXML
       var durationElem = noteElem.Elements().FirstOrDefault(e => e.Name.LocalName == "duration");
       if (durationElem != null && int.TryParse(durationElem.Value, out int duration))
       {
-        // Determine note type from divisions
-        // This is a simplified mapping
-        note.Duration = new Duration(Duration.NoteType.Quarter);
+        // Prefer MusicXML's <type> for rhythmic value.
+        var typeElem = noteElem.Elements().FirstOrDefault(e => e.Name.LocalName == "type")?.Value;
+        var dots = noteElem.Elements().Count(e => e.Name.LocalName == "dot");
+
+        note.Duration = new Duration(ParseNoteType(typeElem), dots);
       }
 
       return note;
+    }
+
+    private static Duration.NoteType ParseNoteType(string musicXmlType)
+    {
+      if (string.IsNullOrEmpty(musicXmlType))
+        return Duration.NoteType.Quarter;
+
+      return musicXmlType.Trim().ToLowerInvariant() switch
+      {
+        "whole" => Duration.NoteType.Whole,
+        "half" => Duration.NoteType.Half,
+        "quarter" => Duration.NoteType.Quarter,
+        "eighth" => Duration.NoteType.Eighth,
+        "16th" => Duration.NoteType.Sixteenth,
+        "sixteenth" => Duration.NoteType.Sixteenth,
+        "32nd" => Duration.NoteType.ThirtySecond,
+        "thirty-second" => Duration.NoteType.ThirtySecond,
+        _ => Duration.NoteType.Quarter,
+      };
     }
   }
 }

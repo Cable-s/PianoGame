@@ -169,6 +169,9 @@ namespace PianoGame.MusicXML
     public Duration Duration { get; set; }
     public double StartBeat { get; set; } // Position in the measure (in beats)
     public double StartTime { get; set; } // Absolute time in seconds
+    public double StartBeatGlobal { get; set; } // Absolute position in the score (in beats)
+    public int MeasureNumber { get; set; } // 1-based measure number
+    public int StaffNumber { get; set; } // MusicXML staff number (1=top/treble, 2=bottom/bass)
     public bool IsRest { get; set; }
 
     public Note()
@@ -265,17 +268,28 @@ namespace PianoGame.MusicXML
     /// <summary>
     /// Gets all notes from all staves in chronological order.
     /// </summary>
-    public List<Note> GetAllNotes()
+    public List<Note> GetAllNotes(bool includeRests = false)
     {
       var allNotes = new List<Note>();
       foreach (var staff in Staves)
       {
         foreach (var measure in staff.Measures)
         {
-          allNotes.AddRange(measure.Notes);
+          if (includeRests)
+          {
+            allNotes.AddRange(measure.Notes);
+          }
+          else
+          {
+            foreach (var n in measure.Notes)
+            {
+              if (n != null && !n.IsRest)
+                allNotes.Add(n);
+            }
+          }
         }
       }
-      allNotes.Sort((a, b) => a.StartTime.CompareTo(b.StartTime));
+      allNotes.Sort((a, b) => a.StartBeatGlobal.CompareTo(b.StartBeatGlobal));
       return allNotes;
     }
   }

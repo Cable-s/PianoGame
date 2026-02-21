@@ -92,6 +92,11 @@ public class Piano : MonoBehaviour
     {
       string noteName = MidiNoteToName(noteOff.Note);
       Debug.Log($"<color=gray>Note OFF: {noteName} (MIDI {noteOff.Note})</color>");
+
+      if (_gameController != null)
+      {
+        _gameController.OnMidiNoteReleased(noteOff.Note);
+      }
     }
   }
 
