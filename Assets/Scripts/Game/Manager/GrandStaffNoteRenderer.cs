@@ -138,6 +138,31 @@ public class GrandStaffNoteRenderer : MonoBehaviour
   [Tooltip("If your staff art is inverted on Y, enable this to flip the pitch-to-Y direction.")]
   [SerializeField] private bool invertYOffset = false;
 
+  [Header("Hit Zone Indicator")]
+  [Tooltip("Enable/disable the hit zone visual indicator.")]
+  [SerializeField] private bool showHitZone = true;
+
+  [Tooltip("Color of the hit zone bar (semi-transparent recommended).")]
+  [SerializeField] private Color hitZoneColor = new Color(0.2f, 0.8f, 0.2f, 0.3f);
+
+  [Tooltip("Width of the hit zone bar in local units.")]
+  [SerializeField] private float hitZoneWidth = 0.3f;
+
+  [Tooltip("Extra padding above treble and below bass for hit zone height.")]
+  [SerializeField] private float hitZoneVerticalPadding = 0.5f;
+
+  [Tooltip("Z position for the hit zone (should be behind notes).")]
+  [SerializeField] private float hitZoneLocalZ = 0f;
+
+  [Tooltip("Sorting layer for the hit zone. Leave empty to use 'Default'.")]
+  [SerializeField] private string hitZoneSortingLayer = "Default";
+
+  [Tooltip("Sorting order for the hit zone. Higher values render in front. Set higher than staff background but lower than notes.")]
+  [SerializeField] private int hitZoneSortingOrder = 5;
+
+  private GameObject _hitZoneInstance;
+  private SpriteRenderer _hitZoneRenderer;
+
   private GameObject _activeNote;
   private GameObject _activeAccidental;
 
@@ -165,6 +190,7 @@ public class GrandStaffNoteRenderer : MonoBehaviour
   {
     TryAutoCalibrateFromMarkers();
     EnsureScrollRoot();
+    CreateHitZone();
   }
 
 #if UNITY_EDITOR
@@ -732,6 +758,76 @@ public class GrandStaffNoteRenderer : MonoBehaviour
     rootGo.transform.localRotation = Quaternion.identity;
     rootGo.transform.localScale = Vector3.one;
     scrollRoot = rootGo.transform;
+  }
+
+  /// <summary>
+  /// Creates the hit zone indicator bar at the play position.
+  /// </summary>
+  private void CreateHitZone()
+  {
+    if (!showHitZone)
+      return;
+
+    // Destroy existing if present
+    if (_hitZoneInstance != null)
+    {
+      Destroy(_hitZoneInstance);
+      _hitZoneInstance = null;
+      _hitZoneRenderer = null;
+    }
+
+    // Create parent object (NOT under scrollRoot so it stays fixed)
+    _hitZoneInstance = new GameObject("HitZone");
+    _hitZoneInstance.transform.SetParent(transform, false);
+
+    // Calculate the height to span from bass bottom to treble top with padding
+    float topY = trebleTopLineY + hitZoneVerticalPadding;
+    float bottomY = bassBottomLineY - hitZoneVerticalPadding;
+    float height = 4.8f;
+    float centerY = (topY + bottomY) / 2f;
+
+    // Position the hit zone at the play position
+    _hitZoneInstance.transform.localPosition = new Vector3(noteLocalX, centerY, hitZoneLocalZ);
+
+    // Add sprite renderer with a simple white texture we can tint
+    _hitZoneRenderer = _hitZoneInstance.AddComponent<SpriteRenderer>();
+    _hitZoneRenderer.sprite = CreateHitZoneSprite();
+    _hitZoneRenderer.color = hitZoneColor;
+
+    // Set sorting layer and order to render in front of staff background
+    if (!string.IsNullOrEmpty(hitZoneSortingLayer))
+      _hitZoneRenderer.sortingLayerName = hitZoneSortingLayer;
+    _hitZoneRenderer.sortingOrder = hitZoneSortingOrder;
+
+    // Scale to desired width and height
+    _hitZoneInstance.transform.localScale = new Vector3(hitZoneWidth, height, 1f);
+  }
+
+  private Sprite CreateHitZoneSprite()
+  {
+    // Create a simple 1x1 white texture that we can scale and tint
+    Texture2D tex = new Texture2D(1, 1);
+    tex.SetPixel(0, 0, Color.white);
+    tex.Apply();
+    return Sprite.Create(tex, new Rect(0, 0, 1, 1), new Vector2(0.5f, 0.5f), 1f);
+  }
+
+  /// <summary>
+  /// Updates the hit zone visibility and color at runtime.
+  /// </summary>
+  public void SetHitZoneVisible(bool visible)
+  {
+    if (_hitZoneInstance != null)
+      _hitZoneInstance.SetActive(visible);
+  }
+
+  /// <summary>
+  /// Updates the hit zone color at runtime.
+  /// </summary>
+  public void SetHitZoneColor(Color color)
+  {
+    if (_hitZoneRenderer != null)
+      _hitZoneRenderer.color = color;
   }
 
   private GameObject GetNotePrefab(Duration.NoteType type)
