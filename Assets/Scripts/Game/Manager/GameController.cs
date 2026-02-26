@@ -13,8 +13,12 @@ using PianoGame.Scoring;
 /// </summary>
 public class GameController : MonoBehaviour
 {
+  public enum HitType { None, Miss, Close, Perfect }
+
   [SerializeField] private TMP_Text scoreDisplay; // Drag a Text UI element here
   [SerializeField] private TMP_Text nextNoteDisplay; // Drag another Text UI element here
+  [SerializeField] private TMP_Text comboDisplay; // Displays current combo
+  [SerializeField] private TMP_Text hitTypeDisplay; // Displays last hit type (Perfect/Close/Miss)
   [SerializeField] private GrandStaffNoteRenderer staffRenderer;
   [SerializeField] private string testMusicPath = "Assets/Music/MozaChloSample.musicxml"; // Path to test file
 
@@ -44,6 +48,18 @@ public class GameController : MonoBehaviour
 
   [Tooltip("Release is considered a break if it occurs more than this many beats before the expected end.")]
   [SerializeField] private float holdReleaseToleranceBeats = 0.1f;
+
+  [Header("Hit Timing Windows (in beats)")]
+  [Tooltip("Timing window for a Perfect hit (default: 1/32 note = 0.125 beats).")]
+  [SerializeField] private float perfectWindowBeats = 0.5f;
+
+  [Tooltip("Timing window for a Close hit (default: 1/16 note = 0.25 beats).")]
+  [SerializeField] private float closeWindowBeats = 1f;
+
+  [Header("Hit Type Colors")]
+  [SerializeField] private Color perfectColor = Color.green;
+  [SerializeField] private Color closeColor = Color.yellow;
+  [SerializeField] private Color missColor = Color.red;
 
   private MusicXmlParser _parser;
   private MusicXmlScore _currentScore;
@@ -92,12 +108,24 @@ public class GameController : MonoBehaviour
 
   private double _practiceBeat = 0.0;
   private float _practiceLastUpdateTime = 0f;
+  private float _practiceGroupArrivalTime = 0f; // Real-world time when beat clock reached current group
+  private int _practiceGroupArrivalIndex = -1; // Which group we last recorded arrival for
 
   private readonly Dictionary<byte, ExpectedNoteEvent> _activeHoldsByMidi = new Dictionary<byte, ExpectedNoteEvent>();
   private readonly List<double> _noteOnErrorsSeconds = new List<double>();
   private int _holdNotesExpected = 0;
   private int _holdBreaks = 0;
   private int _missedNotes = 0;
+
+  // Hit type tracking
+  private int _perfectCount = 0;
+  private int _closeCount = 0;
+  private int _missCount = 0;
+  private HitType _lastHitType = HitType.None;
+
+  // Combo tracking
+  private int _currentCombo = 0;
+  private int _longestCombo = 0;
 
   private void Update()
   {
@@ -244,6 +272,20 @@ public class GameController : MonoBehaviour
       _holdBreaks = 0;
       _missedNotes = 0;
 
+      // Reset hit type and combo tracking
+      _perfectCount = 0;
+      _closeCount = 0;
+      _missCount = 0;
+      _lastHitType = HitType.None;
+      _currentCombo = 0;
+      _longestCombo = 0;
+
+      // Reset practice mode state
+      _practiceBeat = 0.0;
+      _practiceLastUpdateTime = 0f;
+      _practiceGroupArrivalTime = 0f;
+      _practiceGroupArrivalIndex = -1;
+
       _isPlaying = true;
       _songStarted = false;
       _countdownActive = true;
@@ -316,7 +358,9 @@ public class GameController : MonoBehaviour
       if (_currentGroupHits.Add(midiNoteNumber))
       {
         _score++;
-        Debug.Log($"[GAME] ✓ CORRECT! ({_currentGroupHits.Count}/{group.RequiredMidiNotes.Count})");
+        HitType hitType = CalculateHitType(midiNoteNumber, group);
+        RecordHit(hitType);
+        Debug.Log($"[GAME] ✓ {hitType}! ({_currentGroupHits.Count}/{group.RequiredMidiNotes.Count})");
 
         TryLogAndStartHoldIfExpected(midiNoteNumber, group);
       }
@@ -337,22 +381,47 @@ public class GameController : MonoBehaviour
     }
     else
     {
-      // Tempo mode: score hits against the CURRENT group, but progression is driven by time.
-      if (!group.RequiredMidiNotes.Contains(midiNoteNumber))
+      // Tempo mode: allow hitting notes within the timing window, even if they're in nearby groups
+      double nowBeat = GetCurrentBeatClock();
+
+      // Find the best matching note across all groups within the timing window
+      var (matchedGroup, matchedGroupIndex, matchedEvent) = FindBestMatchingNote(midiNoteNumber, nowBeat);
+
+      if (matchedGroup == null || matchedEvent == null)
       {
         _mistakes++;
-        Debug.Log($"[GAME] ✗ MISTAKE ({_mistakes}): Wrong/extra note (tempo mode)");
+        _missCount++;
+        _lastHitType = HitType.Miss;
+        BreakCombo("Wrong/extra note (tempo mode)");
+        Debug.Log($"[GAME] ✗ MISS ({_missCount}): Wrong/extra note - no matching note within window (tempo mode)");
         UpdateUI();
         return;
       }
 
-      if (_currentGroupHits.Add(midiNoteNumber))
+      // Calculate hit type based on timing
+      double deltaBeats = System.Math.Abs(nowBeat - matchedEvent.StartBeat);
+      Debug.Log($"[TIMING] Tempo mode: nowBeat={nowBeat:F3}, matchedBeat={matchedEvent.StartBeat:F3}, deltaBeats={deltaBeats:F3}");
+
+      HitType hitType;
+      if (deltaBeats <= perfectWindowBeats)
+        hitType = HitType.Perfect;
+      else if (deltaBeats <= closeWindowBeats)
+        hitType = HitType.Close;
+      else
+        hitType = HitType.Miss;
+
+      Debug.Log($"[TIMING] Windows: perfect<={perfectWindowBeats:F3}, close<={closeWindowBeats:F3}, delta={deltaBeats:F3}, result={hitType}");
+
+      // Mark the event as hit
+      if (!matchedEvent.Hit)
       {
+        matchedEvent.Hit = true;
         _score++;
-        Debug.Log($"[GAME] ✓ HIT (tempo mode)! ({_currentGroupHits.Count}/{group.RequiredMidiNotes.Count})");
+        RecordHit(hitType);
+        Debug.Log($"[GAME] ✓ {hitType} (tempo mode)! Matched group {matchedGroupIndex} at beat {matchedEvent.StartBeat:F2}");
         UpdateUI();
 
-        TryLogAndStartHoldIfExpected(midiNoteNumber, group);
+        TryLogAndStartHoldIfExpected(midiNoteNumber, matchedGroup);
       }
     }
   }
@@ -374,6 +443,7 @@ public class GameController : MonoBehaviour
         {
           ev.Broken = true;
           _holdBreaks++;
+          BreakCombo("Hold break");
           Debug.Log($"[PERF] HOLD BREAK: MIDI {midiNoteNumber} released at beat {nowBeat:F2}, expected end {ev.EndBeat:F2}");
         }
       }
@@ -460,7 +530,36 @@ public class GameController : MonoBehaviour
     else
       Debug.LogWarning("[GAME] nextNoteDisplay is null, cannot update!");
 
-    Debug.Log($"[GAME UI] {scoreText} | Next Note: {nextNote}");
+    // Update combo display
+    if (comboDisplay != null)
+    {
+      comboDisplay.text = _currentCombo > 0 ? $"{_currentCombo}" : "";
+    }
+
+    // Update hit type display
+    if (hitTypeDisplay != null)
+    {
+      switch (_lastHitType)
+      {
+        case HitType.Perfect:
+          hitTypeDisplay.text = "PERFECT";
+          hitTypeDisplay.color = perfectColor;
+          break;
+        case HitType.Close:
+          hitTypeDisplay.text = "CLOSE";
+          hitTypeDisplay.color = closeColor;
+          break;
+        case HitType.Miss:
+          hitTypeDisplay.text = "MISS";
+          hitTypeDisplay.color = missColor;
+          break;
+        default:
+          hitTypeDisplay.text = "";
+          break;
+      }
+    }
+
+    Debug.Log($"[GAME UI] {scoreText} | Next Note: {nextNote} | Combo: {_currentCombo}");
   }
 
   public void StartGame()
@@ -509,12 +608,21 @@ public class GameController : MonoBehaviour
     _holdNotesExpected = 0;
     _holdBreaks = 0;
 
+    _perfectCount = 0;
+    _closeCount = 0;
+    _missCount = 0;
+    _lastHitType = HitType.None;
+    _currentCombo = 0;
+    _longestCombo = 0;
+
     _countdownActive = false;
     _countdownEndTime = 0f;
     _songStarted = false;
     _songStartTime = 0f;
     _practiceBeat = 0.0;
     _practiceLastUpdateTime = 0f;
+    _practiceGroupArrivalTime = 0f;
+    _practiceGroupArrivalIndex = -1;
     _isPlaying = false;
 
     if (staffRenderer != null)
@@ -527,11 +635,166 @@ public class GameController : MonoBehaviour
   private void RegisterMistakeAndResetGroup(string reason)
   {
     _mistakes++;
+    _missCount++;
+    _lastHitType = HitType.Miss;
+    BreakCombo(reason);
     _currentGroupHits.Clear();
     _groupWindowActive = false;
     _groupWindowStartTime = 0f;
-    Debug.Log($"[GAME] ✗ MISTAKE ({_mistakes}): {reason}");
+    Debug.Log($"[GAME] ✗ MISS ({_missCount}): {reason}");
     UpdateUI();
+  }
+
+  /// <summary>
+  /// Calculates the hit type based on timing accuracy.
+  /// </summary>
+  private HitType CalculateHitType(byte midiNoteNumber, ExpectedNoteGroup group)
+  {
+    var ev = group.Events.FirstOrDefault(e => e != null && e.Midi == midiNoteNumber);
+    if (ev == null)
+      return HitType.Close; // Fallback
+
+    double deltaBeats;
+
+    if (practiceMode)
+    {
+      // In practice mode, the beat clock is clamped to the target beat.
+      // Use real-world time to measure how late/early the player pressed.
+
+      // Safeguard: if arrival hasn't been recorded for this group yet, treat as perfect
+      if (_practiceGroupArrivalIndex != _currentGroupIndex)
+      {
+        Debug.Log($"[TIMING] Practice mode: arrival not yet recorded for group {_currentGroupIndex}, treating as perfect");
+        deltaBeats = 0;
+      }
+      else
+      {
+        int bpm = GetPlaybackBpm();
+        float secondsSinceArrival = Time.time - _practiceGroupArrivalTime;
+        // Convert seconds to beats: positive = late (dragging)
+        deltaBeats = System.Math.Abs(secondsSinceArrival * (bpm / 60.0));
+
+        Debug.Log($"[TIMING] Practice mode: arrivalTime={_practiceGroupArrivalTime:F3}, now={Time.time:F3}, secsSince={secondsSinceArrival:F3}, deltaBeats={deltaBeats:F3}");
+      }
+    }
+    else
+    {
+      // In tempo mode, use beat clock directly
+      double nowBeat = GetCurrentBeatClock();
+      deltaBeats = System.Math.Abs(nowBeat - ev.StartBeat);
+
+      Debug.Log($"[TIMING] Tempo mode: nowBeat={nowBeat:F3}, expectedBeat={ev.StartBeat:F3}, deltaBeats={deltaBeats:F3}");
+    }
+
+    Debug.Log($"[TIMING] Windows: perfect<={perfectWindowBeats:F3}, close<={closeWindowBeats:F3}, delta={deltaBeats:F3}");
+
+    if (deltaBeats <= perfectWindowBeats)
+      return HitType.Perfect;
+    else if (deltaBeats <= closeWindowBeats)
+      return HitType.Close;
+    else
+      return HitType.Miss; // Too far off, but note was correct
+  }
+
+  /// <summary>
+  /// Records a hit and updates combo.
+  /// </summary>
+  private void RecordHit(HitType hitType)
+  {
+    _lastHitType = hitType;
+
+    switch (hitType)
+    {
+      case HitType.Perfect:
+        _perfectCount++;
+        _currentCombo++;
+        break;
+      case HitType.Close:
+        _closeCount++;
+        _currentCombo++;
+        break;
+      case HitType.Miss:
+        _missCount++;
+        BreakCombo("Timing miss");
+        break;
+    }
+
+    if (_currentCombo > _longestCombo)
+      _longestCombo = _currentCombo;
+
+    UpdateUI();
+  }
+
+  /// <summary>
+  /// Breaks the current combo.
+  /// </summary>
+  private void BreakCombo(string reason)
+  {
+    if (_currentCombo > 0)
+    {
+      Debug.Log($"[GAME] Combo broken at {_currentCombo}: {reason}");
+      _currentCombo = 0;
+    }
+  }
+
+  /// <summary>
+  /// Finds the best matching note for a MIDI input within the timing window.
+  /// Searches nearby groups (past and future) to allow early/late hits.
+  /// </summary>
+  private (ExpectedNoteGroup group, int groupIndex, ExpectedNoteEvent ev) FindBestMatchingNote(byte midiNoteNumber, double nowBeat)
+  {
+    // Use the larger window (closeWindowBeats) for the search range
+    double searchWindow = closeWindowBeats;
+
+    ExpectedNoteGroup bestGroup = null;
+    int bestGroupIndex = -1;
+    ExpectedNoteEvent bestEvent = null;
+    double bestDelta = double.MaxValue;
+
+    // Search groups that could be within the timing window
+    for (int i = 0; i < _expectedGroups.Count; i++)
+    {
+      var grp = _expectedGroups[i];
+      double groupBeat = grp.StartBeatGlobal;
+
+      // Quick check: is this group within the search window?
+      double groupDelta = System.Math.Abs(nowBeat - groupBeat);
+      if (groupDelta > searchWindow + 1.0) // Add some buffer for chords
+      {
+        // If we've passed the window and groups are sorted by beat, we can optimize
+        if (groupBeat > nowBeat + searchWindow + 1.0)
+          break; // All future groups are too far
+        continue;
+      }
+
+      // Look for matching note in this group
+      foreach (var ev in grp.Events)
+      {
+        if (ev == null || ev.Midi != midiNoteNumber)
+          continue;
+
+        // Skip already hit notes
+        if (ev.Hit)
+          continue;
+
+        double delta = System.Math.Abs(nowBeat - ev.StartBeat);
+
+        // Must be within the close window to be considered at all
+        if (delta > searchWindow)
+          continue;
+
+        // Find the closest match
+        if (delta < bestDelta)
+        {
+          bestDelta = delta;
+          bestGroup = grp;
+          bestGroupIndex = i;
+          bestEvent = ev;
+        }
+      }
+    }
+
+    return (bestGroup, bestGroupIndex, bestEvent);
   }
 
   private void UpdateCountdownUI()
@@ -553,6 +816,8 @@ public class GameController : MonoBehaviour
 
     _practiceBeat = 0.0;
     _practiceLastUpdateTime = Time.time;
+    _practiceGroupArrivalTime = 0f;
+    _practiceGroupArrivalIndex = -1;
 
     _currentGroupHits.Clear();
     _groupWindowActive = false;
@@ -593,6 +858,14 @@ public class GameController : MonoBehaviour
     double targetBeat = _expectedGroups[_currentGroupIndex].StartBeatGlobal;
     if (_practiceBeat + 0.0001 >= targetBeat)
     {
+      // Record the real-world time when we first arrive at this group's beat
+      if (_practiceGroupArrivalIndex != _currentGroupIndex)
+      {
+        _practiceGroupArrivalTime = Time.time;
+        _practiceGroupArrivalIndex = _currentGroupIndex;
+        Debug.Log($"[TIMING] Arrived at group {_currentGroupIndex} (beat {targetBeat:F2}) at time {_practiceGroupArrivalTime:F3}");
+      }
+
       _practiceLastUpdateTime = Time.time;
       _practiceBeat = targetBeat;
       return;
@@ -626,12 +899,19 @@ public class GameController : MonoBehaviour
         break;
 
       // If the current group wasn't completed in time, count a mistake.
+      // Check the Hit flag on each event instead of _currentGroupHits (which is only used in practice mode)
       var current = _expectedGroups[_currentGroupIndex];
-      if (_currentGroupHits.Count < current.RequiredMidiNotes.Count)
+      int hitCount = current.Events.Count(ev => ev != null && ev.Hit);
+      int missedInGroup = current.RequiredMidiNotes.Count - hitCount;
+
+      if (missedInGroup > 0)
       {
         _mistakes++;
-        _missedNotes += Mathf.Max(0, current.RequiredMidiNotes.Count - _currentGroupHits.Count);
-        Debug.Log($"[GAME] ✗ MISTAKE ({_mistakes}): Missed group at beat {current.StartBeatGlobal:F2} (tempo mode)");
+        _missedNotes += missedInGroup;
+        _missCount += missedInGroup;
+        _lastHitType = HitType.Miss;
+        BreakCombo($"Missed group at beat {current.StartBeatGlobal:F2}");
+        Debug.Log($"[GAME] ✗ MISS ({_missCount}): Missed {missedInGroup} note(s) in group at beat {current.StartBeatGlobal:F2} (tempo mode)");
       }
 
       _currentGroupIndex++;
@@ -739,12 +1019,12 @@ public class GameController : MonoBehaviour
   private string BuildPerformanceSummary()
   {
     if (_noteOnErrorsSeconds.Count == 0)
-      return $"Perf: no hits";
+      return $"Perf: no hits | Perfect: {_perfectCount}, Close: {_closeCount}, Miss: {_missCount} | Best Combo: {_longestCombo}";
 
     double avgAbs = _noteOnErrorsSeconds.Select(System.Math.Abs).Average();
     int early = _noteOnErrorsSeconds.Count(d => d < 0);
     int late = _noteOnErrorsSeconds.Count - early;
 
-    return $"Perf: avg|Δt|={avgAbs:F3}s (early={early}, late={late}), holds={_holdNotesExpected}, breaks={_holdBreaks}, missedNotes={_missedNotes}";
+    return $"Perf: avg|Δt|={avgAbs:F3}s (early={early}, late={late}), holds={_holdNotesExpected}, breaks={_holdBreaks}, missedNotes={_missedNotes} | Perfect: {_perfectCount}, Close: {_closeCount}, Miss: {_missCount} | Best Combo: {_longestCombo}";
   }
 }
