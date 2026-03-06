@@ -1,8 +1,10 @@
 ﻿<Solution>
   <Project Path="MIDI.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="PianoGame.Game.csproj" />
   <Project Path="MusicXML.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
+  <Project Path="PianoGame.UI.csproj" />
   <Project Path="Scoring.csproj" />
   <Project Path="Managers.csproj" />
 </Solution>

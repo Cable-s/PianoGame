@@ -1350,8 +1350,10 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="Managers.csproj" />
+    <ProjectReference Include="PianoGame.Game.csproj" />
     <ProjectReference Include="MusicXML.csproj" />
     <ProjectReference Include="Scoring.csproj" />
+    <ProjectReference Include="PianoGame.UI.csproj" />
     <ProjectReference Include="MIDI.csproj" />
   </ItemGroup>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />

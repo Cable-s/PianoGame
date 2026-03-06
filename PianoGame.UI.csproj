@@ -16,9 +16,9 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <EnableDefaultItems>false</EnableDefaultItems>
     <LangVersion>9.0</LangVersion>
-    <RootNamespace></RootNamespace>
+    <RootNamespace>PianoGame.UI</RootNamespace>
     <OutputType>Library</OutputType>
-    <AssemblyName>Managers</AssemblyName>
+    <AssemblyName>PianoGame.UI</AssemblyName>
     <TargetFramework>netstandard2.1</TargetFramework>
     <BaseDirectory>.</BaseDirectory>
   </PropertyGroup>
@@ -48,13 +48,14 @@
     <Analyzer Include="D:\Unity\6000.3.8f1\Editor\Data\Tools\BuildPipeline\Unity.SourceGenerators\Unity.UIToolkit.SourceGenerator.dll" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Assets\Scripts\Game\Manager\MusicFileSelector.cs" />
-    <Compile Include="Assets\Scripts\Game\Manager\GameController.cs" />
-    <Compile Include="Assets\Scripts\Game\Manager\GrandStaffNoteRenderer.cs" />
-    <Compile Include="Assets\Scripts\Game\Manager\Piano.cs" />
+    <Compile Include="Assets\Scripts\Game\UI\SettingsController.cs" />
+    <Compile Include="Assets\Scripts\Game\UI\LevelSelectionController.cs" />
+    <Compile Include="Assets\Scripts\Game\UI\EndSongController.cs" />
+    <Compile Include="Assets\Scripts\Game\UI\MainMenuController.cs" />
+    <Compile Include="Assets\Scripts\Game\UI\PauseModalController.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Assets\Scripts\Game\Manager\Managers.asmdef" />
+    <None Include="Assets\Scripts\Game\UI\PianoGame.UI.asmdef" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="UnityEngine">
@@ -1149,6 +1150,10 @@
       <HintPath>Library\ScriptAssemblies\Unity.TextMeshPro.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="Unity.InputSystem">
+      <HintPath>Library\ScriptAssemblies\Unity.InputSystem.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEditor.UI">
       <HintPath>Library\ScriptAssemblies\UnityEditor.UI.dll</HintPath>
       <Private>False</Private>
@@ -1159,10 +1164,10 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="PianoGame.Game.csproj" />
     <ProjectReference Include="MIDI.csproj" />
     <ProjectReference Include="MusicXML.csproj" />
-    <ProjectReference Include="Scoring.csproj" />
-    <ProjectReference Include="PianoGame.Game.csproj" />
+    <ProjectReference Include="Managers.csproj" />
   </ItemGroup>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
   <ItemGroup>
