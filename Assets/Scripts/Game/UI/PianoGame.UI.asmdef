@@ -1,12 +1,13 @@
 {
-    "name": "Managers",
-    "rootNamespace": "",
+    "name": "PianoGame.UI",
+    "rootNamespace": "PianoGame.UI",
     "references": [
-        "GUID:fcbf8308aac8fd4428441bab1d40a9b6",
-        "GUID:8292c23544894004e9a2ba1ee24fbd7e",
-        "GUID:000d3324ce82b4840b47dbd837e224dd",
+        "PianoGame.Game",
+        "MIDI",
+        "MusicXML",
         "Unity.TextMeshPro",
-        "PianoGame.Game"
+        "Unity.InputSystem",
+        "Managers"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
