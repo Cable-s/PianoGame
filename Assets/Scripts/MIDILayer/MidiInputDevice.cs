@@ -319,7 +319,11 @@ namespace PianoGame.MIDI
       {
         try
         {
+          // Stop input first
           MidiNative.midiInStop(_midiInHandle);
+
+          // Reset the device to return all pending buffers
+          MidiNative.midiInReset(_midiInHandle);
 
           // Unprepare the buffer header if we have one
           if (_headerPtr != IntPtr.Zero)
