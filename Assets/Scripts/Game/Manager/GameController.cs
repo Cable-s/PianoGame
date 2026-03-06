@@ -39,6 +39,9 @@ public class GameController : MonoBehaviour
   [Tooltip("Seconds to count down before starting.")]
   [SerializeField] private float startCountdownSeconds = 3f;
 
+  [Tooltip("Extra beats of rest inserted at the start of every song to give time after countdown.")]
+  [SerializeField] private float leadInBeats = 2f;
+
   [Header("Chord / Simultaneous Input")]
   [Tooltip("Time window (seconds) to complete a chord/two-hand group after the first correct key is pressed.")]
   [SerializeField] private float simultaneousWindowSeconds = 0.25f;
@@ -327,8 +330,8 @@ public class GameController : MonoBehaviour
       _currentCombo = 0;
       _longestCombo = 0;
 
-      // Reset practice mode state
-      _practiceBeat = 0.0;
+      // Reset practice mode state (start at -leadInBeats for lead-in rest)
+      _practiceBeat = -leadInBeats;
       _practiceLastUpdateTime = 0f;
       _practiceGroupArrivalTime = 0f;
       _practiceGroupArrivalIndex = -1;
@@ -345,12 +348,13 @@ public class GameController : MonoBehaviour
 
       Debug.Log($"[GAME] Loaded {_totalNotes} notes from {filePath}");
       Debug.Log($"[GAME] Note groups: {_expectedGroups.Count}");
+      Debug.Log($"[GAME] Lead-in: {leadInBeats} beats");
 
       // Build the full score once; scrolling will be driven by a beat clock.
       if (staffRenderer != null && _renderNotes.Count > 0)
       {
         staffRenderer.BuildFullScore(_renderNotes);
-        staffRenderer.SetScrollBeat(0.0);
+        staffRenderer.SetScrollBeat(-leadInBeats);
       }
 
       UpdateUI();
@@ -951,7 +955,8 @@ public class GameController : MonoBehaviour
     _songStarted = true;
     _songStartTime = Time.time;
 
-    _practiceBeat = 0.0;
+    // Initialize practice beat with lead-in offset
+    _practiceBeat = -leadInBeats;
     _practiceLastUpdateTime = Time.time;
     _practiceGroupArrivalTime = 0f;
     _practiceGroupArrivalIndex = -1;
@@ -976,7 +981,8 @@ public class GameController : MonoBehaviour
   {
     int bpm = GetPlaybackBpm();
     double elapsedSeconds = Time.time - _songStartTime - _totalPausedTime;
-    return elapsedSeconds * (bpm / 60.0);
+    // Start at -leadInBeats so the first note (at beat 0) is reached after leadInBeats worth of time
+    return (elapsedSeconds * (bpm / 60.0)) - leadInBeats;
   }
 
   private double GetCurrentBeatClock()
@@ -1026,11 +1032,13 @@ public class GameController : MonoBehaviour
     float elapsed = Time.time - _songStartTime - _totalPausedTime;
 
     // Advance as long as we've passed the NEXT group's scheduled time.
+    // Account for leadInBeats offset: notes at beat 0 should be due at elapsed = leadInBeats * (60/bpm)
     bool advanced = false;
     while (_currentGroupIndex + 1 < _expectedGroups.Count)
     {
       double nextBeat = _expectedGroups[_currentGroupIndex + 1].StartBeatGlobal;
-      float nextTime = (float)(nextBeat * (60.0 / bpm));
+      // Add leadInBeats to account for the lead-in rest period
+      float nextTime = (float)((nextBeat + leadInBeats) * (60.0 / bpm));
 
       if (elapsed < nextTime)
         break;
@@ -1073,7 +1081,8 @@ public class GameController : MonoBehaviour
       }
 
       // Add a small buffer after the note ends for visual/audio completion
-      double cutoffBeat = maxEndBeat + closeWindowBeats;
+      // Include leadInBeats offset for consistent timing
+      double cutoffBeat = maxEndBeat + closeWindowBeats + leadInBeats;
       float cutoffTime = (float)(cutoffBeat * (60.0 / bpm));
 
       if (elapsed >= cutoffTime)
@@ -1123,13 +1132,13 @@ public class GameController : MonoBehaviour
     return leftHandEnabled || rightHandEnabled;
   }
 
-  private static List<ExpectedNoteGroup> BuildExpectedGroups(List<Note> notes)
+  private List<ExpectedNoteGroup> BuildExpectedGroups(List<Note> notes)
   {
     var groups = new List<ExpectedNoteGroup>();
     if (notes == null || notes.Count == 0)
       return groups;
 
-    // Group by absolute beat position.
+    // Group by absolute beat position, offset by leadInBeats for timing.
     var ordered = notes
       .Where(n => n != null && !n.IsRest)
       .OrderBy(n => n.StartBeatGlobal)
