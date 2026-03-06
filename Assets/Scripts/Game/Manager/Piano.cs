@@ -1,4 +1,5 @@
 using UnityEngine;
+using PianoGame.Game;
 using PianoGame.MIDI;
 using PianoGame.MusicXML;
 using PianoGame.Scoring;
@@ -32,13 +33,16 @@ public class Piano : MonoBehaviour
       Debug.Log($"  {i}: {availableDevices[i]}");
     }
 
-    // Open first available device
-    if (availableDevices.Count > 0)
+    // Determine which device to open based on GameSettings
+    int deviceIndexToUse = DetermineDeviceIndex(availableDevices.Count);
+
+    // Open the selected device
+    if (availableDevices.Count > 0 && deviceIndexToUse >= 0 && deviceIndexToUse < availableDevices.Count)
     {
       try
       {
-        MidiInputDevice = factory.CreateDevice(0);
-        Debug.Log($"[MIDI] Created device: {MidiInputDevice.DeviceName}");
+        MidiInputDevice = factory.CreateDevice(deviceIndexToUse);
+        Debug.Log($"[MIDI] Created device: {MidiInputDevice.DeviceName} (index {deviceIndexToUse})");
 
         MidiInputDevice.Open();
         Debug.Log($"[MIDI] Device opened successfully");
@@ -47,6 +51,18 @@ public class Piano : MonoBehaviour
       catch (Exception ex)
       {
         Debug.LogError($"[MIDI ERROR] Failed to open device: {ex.Message}\n{ex.StackTrace}");
+
+        // Error code 4 = MMSYSERR_ALLOCATED (device already in use)
+        if (ex.Message.Contains("error code 4"))
+        {
+          Debug.LogWarning("[MIDI] Device is already in use. This can happen if:");
+          Debug.LogWarning("  1. Unity Editor was stopped without proper cleanup");
+          Debug.LogWarning("  2. Another application has the MIDI device open");
+          Debug.LogWarning("  3. Try: Stop play mode, wait a few seconds, and play again");
+          Debug.LogWarning("  4. Or: Restart Unity Editor to release the device handle");
+        }
+
+        MidiInputDevice = null;
         return;
       }
     }
@@ -63,6 +79,31 @@ public class Piano : MonoBehaviour
 
     Debug.Log("[MIDI] System initialized and listening...");
     Debug.Log("[MIDI] Play a note on your keyboard now!");
+  }
+
+  /// <summary>
+  /// Determines which MIDI device index to use based on GameSettings.
+  /// </summary>
+  private int DetermineDeviceIndex(int availableCount)
+  {
+    int savedIndex = GameSettings.MidiDeviceIndex;
+
+    if (savedIndex < 0)
+    {
+      // Auto mode: use first available
+      Debug.Log("[MIDI] Auto mode: using first available device");
+      return 0;
+    }
+
+    if (savedIndex < availableCount)
+    {
+      Debug.Log($"[MIDI] Using saved device index: {savedIndex}");
+      return savedIndex;
+    }
+
+    // Saved device not found, fall back to first available
+    Debug.LogWarning($"[MIDI] Saved device index {savedIndex} not found, falling back to first available");
+    return 0;
   }
 
   private void Update()
@@ -116,15 +157,36 @@ public class Piano : MonoBehaviour
 
   private void OnDestroy()
   {
+    CleanupMidi();
+  }
+
+  private void OnApplicationQuit()
+  {
+    CleanupMidi();
+  }
+
+  private void CleanupMidi()
+  {
     if (_midiEmitter != null)
     {
       _midiEmitter.MidiEventOccurred -= OnMidiEventReceived;
+      _midiEmitter = null;
     }
 
     if (MidiInputDevice != null)
     {
-      MidiInputDevice.Close();
-      MidiInputDevice.Dispose();
+      try
+      {
+        Debug.Log("[MIDI] Closing device...");
+        MidiInputDevice.Close();
+        MidiInputDevice.Dispose();
+        Debug.Log("[MIDI] Device closed successfully");
+      }
+      catch (Exception ex)
+      {
+        Debug.LogWarning($"[MIDI] Error during cleanup: {ex.Message}");
+      }
+      MidiInputDevice = null;
     }
   }
 }
