@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using UnityEngine;
 using TMPro;
+using PianoGame.Game;
 using PianoGame.MIDI;
 using PianoGame.MusicXML;
 using PianoGame.Scoring;
@@ -127,9 +128,18 @@ public class GameController : MonoBehaviour
   private int _currentCombo = 0;
   private int _longestCombo = 0;
 
+  // Pause state
+  private bool _isPaused = false;
+  private float _pauseStartTime = 0f;
+  private float _totalPausedTime = 0f;
+
   private void Update()
   {
     if (!_isPlaying)
+      return;
+
+    // Skip game updates while paused
+    if (_isPaused)
       return;
 
     if (_countdownActive)
@@ -184,6 +194,43 @@ public class GameController : MonoBehaviour
     if (staffRenderer == null)
     {
       staffRenderer = FindFirstObjectByType<GrandStaffNoteRenderer>();
+    }
+
+    // Apply settings from GameData (set by Level Selection scene)
+    ApplyGameDataSettings();
+
+    // Auto-load song if selected from Level Selection
+    if (!string.IsNullOrEmpty(GameData.SelectedSongPath))
+    {
+      Debug.Log($"[GAME] Auto-loading song from GameData: {GameData.SelectedSongPath}");
+      LoadMusic(GameData.SelectedSongPath);
+    }
+    else if (!string.IsNullOrEmpty(testMusicPath))
+    {
+      // Fallback for testing in editor without going through Level Selection
+      Debug.Log($"[GAME] No GameData song set, using test path: {testMusicPath}");
+      LoadMusic(testMusicPath);
+    }
+  }
+
+  /// <summary>
+  /// Applies settings from GameData (left hand, practice mode, BPM).
+  /// </summary>
+  private void ApplyGameDataSettings()
+  {
+    // Apply left hand setting
+    leftHandEnabled = GameData.LeftHandEnabled;
+    Debug.Log($"[GAME] Applied left hand setting: {leftHandEnabled}");
+
+    // Apply practice mode setting
+    practiceMode = GameData.PracticeModeEnabled;
+    Debug.Log($"[GAME] Applied practice mode setting: {practiceMode}");
+
+    // Apply BPM setting
+    if (GameData.SelectedBpm > 0)
+    {
+      tempoBpm = GameData.SelectedBpm;
+      Debug.Log($"[GAME] Applied BPM setting: {tempoBpm}");
     }
   }
 
@@ -286,6 +333,11 @@ public class GameController : MonoBehaviour
       _practiceGroupArrivalTime = 0f;
       _practiceGroupArrivalIndex = -1;
 
+      // Reset pause state
+      _isPaused = false;
+      _pauseStartTime = 0f;
+      _totalPausedTime = 0f;
+
       _isPlaying = true;
       _songStarted = false;
       _countdownActive = true;
@@ -314,7 +366,10 @@ public class GameController : MonoBehaviour
   /// </summary>
   public void OnMidiNoteReceived(byte midiNoteNumber)
   {
-    if (!_isPlaying || _countdownActive || !_songStarted || _currentGroupIndex >= _expectedGroups.Count)
+    // Debug: Log all MIDI input to verify detection
+    Debug.Log($"[MIDI INPUT] Received note {midiNoteNumber} | isPlaying={_isPlaying} | songStarted={_songStarted} | countdownActive={_countdownActive} | isPaused={_isPaused} | groupIndex={_currentGroupIndex}/{_expectedGroups.Count}");
+
+    if (!_isPlaying || _countdownActive || !_songStarted || _isPaused || _currentGroupIndex >= _expectedGroups.Count)
       return;
 
     // In practice mode, if we're currently inside a rest span before the next playable group,
@@ -458,7 +513,44 @@ public class GameController : MonoBehaviour
 
     string perfSummary = BuildPerformanceSummary();
     Debug.Log($"[GAME] SONG COMPLETE! Final Score: {_score}/{_totalNotes} | Mistakes: {_mistakes} | {perfSummary}");
+
+    // Save results to GameData for the EndSong screen
+    SaveResultsToGameData();
+
     UpdateUI();
+
+    // Navigate to EndSong scene after a short delay
+    StartCoroutine(NavigateToEndSongDelayed(1.5f));
+  }
+
+  /// <summary>
+  /// Saves the game results to GameData for the EndSong screen.
+  /// </summary>
+  private void SaveResultsToGameData()
+  {
+    GameData.MaxCombo = _longestCombo;
+    GameData.TotalNotes = _totalNotes;
+    GameData.PerfectHits = _perfectCount;
+    GameData.CloseHits = _closeCount;
+    GameData.MissedNotes = _missCount;
+    GameData.FinalScore = _score;
+
+    Debug.Log($"[GAME] Results saved to GameData:");
+    Debug.Log($"  - Max Combo: {GameData.MaxCombo}");
+    Debug.Log($"  - Total Notes: {GameData.TotalNotes}");
+    Debug.Log($"  - Perfect: {GameData.PerfectHits}, Close: {GameData.CloseHits}, Miss: {GameData.MissedNotes}");
+    Debug.Log($"  - Accuracy: {GameData.GetAccuracyPercent():F1}%");
+    Debug.Log($"  - Grade: {GameData.GetLetterGrade()}");
+    Debug.Log($"  - Full Combo: {GameData.IsFullCombo}");
+
+    // Save personal best if this is a new record
+    GameData.SavePersonalBestIfBetter();
+  }
+
+  private System.Collections.IEnumerator NavigateToEndSongDelayed(float delay)
+  {
+    yield return new WaitForSeconds(delay);
+    SceneNavigator.GoToEndSong();
   }
 
   private void UpdateUI()
@@ -567,6 +659,45 @@ public class GameController : MonoBehaviour
     LoadMusic(testMusicPath);
   }
 
+  /// <summary>
+  /// Returns whether the game can currently be paused.
+  /// </summary>
+  public bool CanPause()
+  {
+    return _isPlaying && _songStarted && !_countdownActive;
+  }
+
+  /// <summary>
+  /// Returns whether the game is currently paused.
+  /// </summary>
+  public bool IsPaused => _isPaused;
+
+  /// <summary>
+  /// Sets the pause state of the game.
+  /// Adjusts song timing to account for time spent paused.
+  /// </summary>
+  public void SetPaused(bool paused)
+  {
+    if (paused == _isPaused)
+      return;
+
+    if (paused)
+    {
+      // Entering pause
+      _isPaused = true;
+      _pauseStartTime = Time.time;
+      Debug.Log("[GAME] Paused");
+    }
+    else
+    {
+      // Exiting pause - add paused duration to total
+      float pauseDuration = Time.time - _pauseStartTime;
+      _totalPausedTime += pauseDuration;
+      _isPaused = false;
+      Debug.Log($"[GAME] Unpaused (was paused for {pauseDuration:F2}s, total paused: {_totalPausedTime:F2}s)");
+    }
+  }
+
   public void ResetGame()
   {
     Debug.Log("[GAME] Reset requested");
@@ -623,6 +754,12 @@ public class GameController : MonoBehaviour
     _practiceLastUpdateTime = 0f;
     _practiceGroupArrivalTime = 0f;
     _practiceGroupArrivalIndex = -1;
+
+    // Reset pause state
+    _isPaused = false;
+    _pauseStartTime = 0f;
+    _totalPausedTime = 0f;
+
     _isPlaying = false;
 
     if (staffRenderer != null)
@@ -838,7 +975,7 @@ public class GameController : MonoBehaviour
   private double GetElapsedBeats()
   {
     int bpm = GetPlaybackBpm();
-    double elapsedSeconds = Time.time - _songStartTime;
+    double elapsedSeconds = Time.time - _songStartTime - _totalPausedTime;
     return elapsedSeconds * (bpm / 60.0);
   }
 
@@ -886,7 +1023,7 @@ public class GameController : MonoBehaviour
       return;
 
     int bpm = GetPlaybackBpm();
-    float elapsed = Time.time - _songStartTime;
+    float elapsed = Time.time - _songStartTime - _totalPausedTime;
 
     // Advance as long as we've passed the NEXT group's scheduled time.
     bool advanced = false;
@@ -917,6 +1054,47 @@ public class GameController : MonoBehaviour
       _currentGroupIndex++;
       _currentGroupHits.Clear();
       advanced = true;
+    }
+
+    // Handle the final group (there is no "next" group to trigger advancement).
+    // Once we've passed the end of all notes in the final group (plus a small timing window),
+    // treat any remaining un-hit notes in that group as misses and finish the song.
+    if (_currentGroupIndex == _expectedGroups.Count - 1)
+    {
+      var current = _expectedGroups[_currentGroupIndex];
+
+      // Find the latest end beat among all notes in the final group
+      // so we wait for the note(s) to complete before ending the song.
+      double maxEndBeat = current.StartBeatGlobal;
+      foreach (var ev in current.Events)
+      {
+        if (ev != null && ev.EndBeat > maxEndBeat)
+          maxEndBeat = ev.EndBeat;
+      }
+
+      // Add a small buffer after the note ends for visual/audio completion
+      double cutoffBeat = maxEndBeat + closeWindowBeats;
+      float cutoffTime = (float)(cutoffBeat * (60.0 / bpm));
+
+      if (elapsed >= cutoffTime)
+      {
+        int hitCount = current.Events.Count(ev => ev != null && ev.Hit);
+        int missedInGroup = current.RequiredMidiNotes.Count - hitCount;
+
+        if (missedInGroup > 0)
+        {
+          _mistakes++;
+          _missedNotes += missedInGroup;
+          _missCount += missedInGroup;
+          _lastHitType = HitType.Miss;
+          BreakCombo($"Missed final group at beat {current.StartBeatGlobal:F2}");
+          Debug.Log($"[GAME] ✗ MISS ({_missCount}): Missed {missedInGroup} note(s) in FINAL group at beat {current.StartBeatGlobal:F2} (tempo mode)");
+        }
+
+        _currentGroupIndex++;
+        _currentGroupHits.Clear();
+        advanced = true;
+      }
     }
 
     if (advanced)
