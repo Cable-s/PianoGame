@@ -945,7 +945,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &721290881
 RectTransform:
   m_ObjectHideFlags: 0
@@ -2141,6 +2141,7 @@ MonoBehaviour:
   practiceMode: 0
   tempoBpm: 15
   startCountdownSeconds: 3
+  leadInBeats: 2
   simultaneousWindowSeconds: 0.25
   holdRequiredMinBeats: 2
   holdReleaseToleranceBeats: 0.1
@@ -2503,7 +2504,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1941072716
 RectTransform:
   m_ObjectHideFlags: 0
@@ -2625,6 +2626,10 @@ PrefabInstance:
       propertyPath: hitZoneLocalZ
       value: -1
       objectReference: {fileID: 0}
+    - target: {fileID: 8557487859862701094, guid: 3ff423a46e207cc4b8b75d69cb2a6b29, type: 3}
+      propertyPath: holdLineSprite
+      value: 
+      objectReference: {fileID: 21300000, guid: 4b6584ccc65599349a04c8084a77c2f9, type: 3}
     - target: {fileID: 8557487859862701094, guid: 3ff423a46e207cc4b8b75d69cb2a6b29, type: 3}
       propertyPath: eighthRestPrefab
       value: 

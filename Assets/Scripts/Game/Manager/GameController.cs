@@ -170,6 +170,9 @@ public class GameController : MonoBehaviour
         RegisterMistakeAndResetGroup("Timed out (missing chord note)");
       }
     }
+
+    // Check for notes being held past their duration (lingering)
+    CheckForHoldLingers();
   }
 
   private void Start()
@@ -353,7 +356,7 @@ public class GameController : MonoBehaviour
       // Build the full score once; scrolling will be driven by a beat clock.
       if (staffRenderer != null && _renderNotes.Count > 0)
       {
-        staffRenderer.BuildFullScore(_renderNotes);
+        staffRenderer.BuildFullScore(_renderNotes, holdRequiredMinBeats);
         staffRenderer.SetScrollBeat(-leadInBeats);
       }
 
@@ -487,6 +490,7 @@ public class GameController : MonoBehaviour
 
   /// <summary>
   /// Called when a MIDI note is released. Used for hold-note break detection.
+  /// Early release (before duration ends) counts as "Close" and breaks combo.
   /// </summary>
   public void OnMidiNoteReleased(byte midiNoteNumber)
   {
@@ -502,8 +506,12 @@ public class GameController : MonoBehaviour
         {
           ev.Broken = true;
           _holdBreaks++;
-          BreakCombo("Hold break");
-          Debug.Log($"[PERF] HOLD BREAK: MIDI {midiNoteNumber} released at beat {nowBeat:F2}, expected end {ev.EndBeat:F2}");
+          // Early release counts as "Close" (almost) and breaks combo
+          _closeCount++;
+          _lastHitType = HitType.Close;
+          BreakCombo("Hold released early");
+          Debug.Log($"[PERF] HOLD BREAK (early release): MIDI {midiNoteNumber} released at beat {nowBeat:F2}, expected end {ev.EndBeat:F2}");
+          UpdateUI();
         }
       }
 
@@ -1200,6 +1208,47 @@ public class GameController : MonoBehaviour
         _activeHoldsByMidi.Add(midiNoteNumber, ev);
         _holdNotesExpected++;
       }
+    }
+  }
+
+  /// <summary>
+  /// Checks for notes being held past their expected end time (lingering).
+  /// Lingering past the duration counts as "Close" (almost) and breaks combo.
+  /// </summary>
+  private void CheckForHoldLingers()
+  {
+    if (_activeHoldsByMidi.Count == 0)
+      return;
+
+    double nowBeat = GetCurrentBeatClock();
+    var keysToRemove = new List<byte>();
+
+    foreach (var kvp in _activeHoldsByMidi)
+    {
+      var ev = kvp.Value;
+
+      // Check if the note is being held past its expected end (with tolerance)
+      if (nowBeat > ev.EndBeat + holdReleaseToleranceBeats)
+      {
+        if (!ev.Broken)
+        {
+          ev.Broken = true;
+          _holdBreaks++;
+          // Lingering past duration counts as "Close" (almost) and breaks combo
+          _closeCount++;
+          _lastHitType = HitType.Close;
+          BreakCombo("Hold lingered past duration");
+          Debug.Log($"[PERF] HOLD BREAK (lingered): MIDI {kvp.Key} still held at beat {nowBeat:F2}, expected end {ev.EndBeat:F2}");
+          UpdateUI();
+        }
+        keysToRemove.Add(kvp.Key);
+      }
+    }
+
+    // Remove lingered notes from active tracking
+    foreach (var key in keysToRemove)
+    {
+      _activeHoldsByMidi.Remove(key);
     }
   }
 

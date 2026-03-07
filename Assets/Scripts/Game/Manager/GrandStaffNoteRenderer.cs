@@ -96,6 +96,25 @@ public class GrandStaffNoteRenderer : MonoBehaviour
   [Tooltip("Local Y offset applied to ledger lines (useful if the prefab pivot is not centered).")]
   [SerializeField] private float ledgerLineLocalYOffset = -0.12f;
 
+  [Header("Hold Lines (Guitar Hero style)")]
+  [Tooltip("Sprite used to render the hold line extending from notes with sufficient duration.")]
+  [SerializeField] private Sprite holdLineSprite;
+
+  [Tooltip("Height (Y scale) of the hold line sprite.")]
+  [SerializeField] private float holdLineHeight = 0.15f;
+
+  [Tooltip("Z offset for hold lines (should be slightly behind notes).")]
+  [SerializeField] private float holdLineZOffset = 0.1f;
+
+  [Tooltip("Color of the hold line.")]
+  [SerializeField] private Color holdLineColor = new Color(0.3f, 0.7f, 1f, 0.8f);
+
+  [Tooltip("Sorting layer for hold lines.")]
+  [SerializeField] private string holdLineSortingLayer = "Default";
+
+  [Tooltip("Sorting order for hold lines (should be behind note heads but in front of staff).")]
+  [SerializeField] private int holdLineSortingOrder = 3;
+
   [Header("Accidentals")]
   [SerializeField] private GameObject sharpPrefab;
   [SerializeField] private GameObject flatPrefab;
@@ -170,6 +189,10 @@ public class GrandStaffNoteRenderer : MonoBehaviour
   private readonly List<GameObject> _activeAccidentals = new List<GameObject>();
   private readonly List<GameObject> _activeLedgerLines = new List<GameObject>();
   private readonly List<GameObject> _activeMeasureLines = new List<GameObject>();
+  private readonly List<GameObject> _activeHoldLines = new List<GameObject>();
+
+  // Hold note threshold passed from GameController
+  private float _holdMinBeats = 1f;
 
   private static readonly Pitch TrebleBottomLinePitch = new Pitch(Pitch.NoteName.E, 4);
   private static readonly Pitch BassBottomLinePitch = new Pitch(Pitch.NoteName.G, 2);
@@ -287,6 +310,7 @@ public class GrandStaffNoteRenderer : MonoBehaviour
     _activeAccidentals.Clear();
     _activeLedgerLines.Clear();
     _activeMeasureLines.Clear();
+    _activeHoldLines.Clear();
   }
 
   public float GetLocalUnitsPerBeat()
@@ -308,7 +332,9 @@ public class GrandStaffNoteRenderer : MonoBehaviour
   /// <summary>
   /// Places the entire score once under a scroll root. Use SetScrollBeat() every frame to scroll smoothly.
   /// </summary>
-  public void BuildFullScore(IReadOnlyList<Note> notes)
+  /// <param name="notes">The notes to render.</param>
+  /// <param name="holdMinBeats">Minimum duration in beats for a note to display a hold line (from GameController).</param>
+  public void BuildFullScore(IReadOnlyList<Note> notes, float holdMinBeats = 1f)
   {
     if (notes == null || notes.Count == 0)
     {
@@ -316,6 +342,7 @@ public class GrandStaffNoteRenderer : MonoBehaviour
       return;
     }
 
+    _holdMinBeats = holdMinBeats;
     Clear();
     EnsureScrollRoot();
 
@@ -389,6 +416,9 @@ public class GrandStaffNoteRenderer : MonoBehaviour
             var localPos = new Vector3(localX, localY, noteLocalZ);
 
             TryCreateLedgerLines(n.Pitch, localX, useTreble);
+
+            // Create hold line for notes with sufficient duration
+            TryCreateHoldLine(n, localX, localY, unitsPerBeat);
 
             var noteGo = SpawnUnderStaffKeepingPrefabScale(notePrefab, localPos);
             _activeNotes.Add(noteGo);
@@ -627,6 +657,61 @@ public class GrandStaffNoteRenderer : MonoBehaviour
         _activeLedgerLines.Add(line);
       }
     }
+  }
+
+  /// <summary>
+  /// Creates a hold line extending to the right of the note head for notes with duration >= _holdMinBeats.
+  /// The line represents how long the player must hold the note.
+  /// </summary>
+  private void TryCreateHoldLine(Note note, float noteLocalX, float noteLocalY, float unitsPerBeat)
+  {
+    if (holdLineSprite == null)
+      return;
+
+    float durationBeats = (float)note.Duration.GetBeats();
+    if (durationBeats < _holdMinBeats)
+      return;
+
+    // Calculate the width of the hold line based on duration
+    float holdLineWidth = durationBeats * unitsPerBeat;
+
+    // Create a game object for the hold line
+    EnsureScrollRoot();
+    Transform parent = scrollRoot != null ? scrollRoot : transform;
+
+    var holdLineGo = new GameObject("HoldLine");
+
+    // Position: start at the note head, extend to the right
+    // Center the hold line so it starts at the note head and extends right
+    float holdLineCenterX = noteLocalX + (holdLineWidth / 2f);
+    Vector3 holdLineLocalPos = new Vector3(holdLineCenterX, noteLocalY, noteLocalZ + holdLineZOffset);
+    Vector3 worldPos = transform.TransformPoint(holdLineLocalPos);
+
+    holdLineGo.transform.position = worldPos;
+    holdLineGo.transform.rotation = transform.rotation;
+    holdLineGo.transform.SetParent(parent, true);
+
+    // Add sprite renderer
+    var sr = holdLineGo.AddComponent<SpriteRenderer>();
+    sr.sprite = holdLineSprite;
+    sr.color = holdLineColor;
+
+    if (!string.IsNullOrEmpty(holdLineSortingLayer))
+      sr.sortingLayerName = holdLineSortingLayer;
+    sr.sortingOrder = holdLineSortingOrder;
+
+    // Scale the sprite to match the duration
+    // The sprite's native width will be scaled to match holdLineWidth
+    // Height is fixed to holdLineHeight
+    float spriteWidth = holdLineSprite.bounds.size.x;
+    float spriteHeight = holdLineSprite.bounds.size.y;
+
+    float scaleX = holdLineWidth / spriteWidth;
+    float scaleY = holdLineHeight / spriteHeight;
+
+    holdLineGo.transform.localScale = new Vector3(scaleX, scaleY, 1f);
+
+    _activeHoldLines.Add(holdLineGo);
   }
 
   private void OnDrawGizmosSelected()
