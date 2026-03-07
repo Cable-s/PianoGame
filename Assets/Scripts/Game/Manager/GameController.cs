@@ -95,6 +95,9 @@ public class GameController : MonoBehaviour
   private bool _groupWindowActive = false;
   private float _groupWindowStartTime = 0f;
 
+  // Practice mode: track tentative hits until group completes (prevents double-counting on reset)
+  private List<HitType> _tentativeGroupHits = new List<HitType>();
+
   private List<Note> _expectedNotes = new List<Note>();
   private int _currentNoteIndex = 0; // legacy single-note index (no longer used for gameplay)
   private int _score = 0;
@@ -121,10 +124,11 @@ public class GameController : MonoBehaviour
   private int _holdBreaks = 0;
   private int _missedNotes = 0;
 
-  // Hit type tracking
+  // Hit type tracking (each expected note counts ONCE as Perfect, Close, or Miss)
   private int _perfectCount = 0;
   private int _closeCount = 0;
   private int _missCount = 0;
+  private int _extraNotes = 0; // Wrong/extra notes played (not counted in totals)
   private HitType _lastHitType = HitType.None;
 
   // Combo tracking
@@ -313,6 +317,7 @@ public class GameController : MonoBehaviour
       _totalNotes = _expectedGroups.Sum(g => g.RequiredMidiNotes.Count);
       _currentGroupIndex = 0;
       _currentGroupHits.Clear();
+      _tentativeGroupHits.Clear();
       _groupWindowActive = false;
       _groupWindowStartTime = 0f;
       _currentNoteIndex = 0;
@@ -329,6 +334,7 @@ public class GameController : MonoBehaviour
       _perfectCount = 0;
       _closeCount = 0;
       _missCount = 0;
+      _extraNotes = 0;
       _lastHitType = HitType.None;
       _currentCombo = 0;
       _longestCombo = 0;
@@ -398,7 +404,18 @@ public class GameController : MonoBehaviour
       // If the player hits anything outside the expected set, it's a mistake and the group resets.
       if (!group.RequiredMidiNotes.Contains(midiNoteNumber))
       {
-        RegisterMistakeAndResetGroup("Wrong/extra note");
+        // Wrong note in practice mode - counts as extra note, resets group to retry
+        _extraNotes++;
+        _mistakes++;
+        _lastHitType = HitType.Miss;
+        BreakCombo("Wrong/extra note");
+        // Discard tentative hits - player must redo the entire group
+        _tentativeGroupHits.Clear();
+        _currentGroupHits.Clear();
+        _groupWindowActive = false;
+        _groupWindowStartTime = 0f;
+        Debug.Log($"[GAME] ✗ EXTRA NOTE ({_extraNotes}): Wrong note pressed, group reset");
+        UpdateUI();
         return;
       }
 
@@ -412,24 +429,44 @@ public class GameController : MonoBehaviour
       // If the window has already expired, count as a miss.
       if (Time.time - _groupWindowStartTime > simultaneousWindowSeconds)
       {
-        RegisterMistakeAndResetGroup("Too slow (missing chord note)");
+        // Timeout in practice mode - counts as extra mistake, resets group to retry
+        _extraNotes++;
+        _mistakes++;
+        _lastHitType = HitType.Miss;
+        BreakCombo("Too slow (missing chord note)");
+        // Discard tentative hits - player must redo the entire group
+        _tentativeGroupHits.Clear();
+        _currentGroupHits.Clear();
+        _groupWindowActive = false;
+        _groupWindowStartTime = 0f;
+        Debug.Log($"[GAME] ✗ TIMEOUT: Chord incomplete, group reset");
+        UpdateUI();
         return;
       }
 
-      // Count each required note once.
+      // Track each required note once (tentatively until group completes).
       if (_currentGroupHits.Add(midiNoteNumber))
       {
         _score++;
         HitType hitType = CalculateHitType(midiNoteNumber, group);
-        RecordHit(hitType);
-        Debug.Log($"[GAME] ✓ {hitType}! ({_currentGroupHits.Count}/{group.RequiredMidiNotes.Count})");
+        // Store tentatively - will be finalized when group completes
+        _tentativeGroupHits.Add(hitType);
+        _lastHitType = hitType;
+        Debug.Log($"[GAME] ✓ {hitType} (tentative)! ({_currentGroupHits.Count}/{group.RequiredMidiNotes.Count})");
 
         TryLogAndStartHoldIfExpected(midiNoteNumber, group);
       }
 
-      // If chord complete within window, advance.
+      // If chord complete within window, finalize counts and advance.
       if (_currentGroupHits.Count >= group.RequiredMidiNotes.Count)
       {
+        // Finalize all tentative hits
+        foreach (var hitType in _tentativeGroupHits)
+        {
+          RecordHitFinal(hitType);
+        }
+        _tentativeGroupHits.Clear();
+
         _currentGroupIndex++;
         _currentGroupHits.Clear();
         _groupWindowActive = false;
@@ -452,10 +489,10 @@ public class GameController : MonoBehaviour
       if (matchedGroup == null || matchedEvent == null)
       {
         _mistakes++;
-        _missCount++;
+        _extraNotes++;
         _lastHitType = HitType.Miss;
         BreakCombo("Wrong/extra note (tempo mode)");
-        Debug.Log($"[GAME] ✗ MISS ({_missCount}): Wrong/extra note - no matching note within window (tempo mode)");
+        Debug.Log($"[GAME] ✗ EXTRA NOTE ({_extraNotes}): Wrong/extra note - no matching note within window (tempo mode)");
         UpdateUI();
         return;
       }
@@ -506,8 +543,8 @@ public class GameController : MonoBehaviour
         {
           ev.Broken = true;
           _holdBreaks++;
-          // Early release counts as "Close" (almost) and breaks combo
-          _closeCount++;
+          // Early release breaks combo but does NOT change the note's hit categorization
+          // The note was already counted when initially hit
           _lastHitType = HitType.Close;
           BreakCombo("Hold released early");
           Debug.Log($"[PERF] HOLD BREAK (early release): MIDI {midiNoteNumber} released at beat {nowBeat:F2}, expected end {ev.EndBeat:F2}");
@@ -547,10 +584,17 @@ public class GameController : MonoBehaviour
     GameData.MissedNotes = _missCount;
     GameData.FinalScore = _score;
 
+    // Verify counts add up
+    int countedNotes = _perfectCount + _closeCount + _missCount;
+    if (countedNotes != _totalNotes)
+    {
+      Debug.LogWarning($"[GAME] Count mismatch! Perfect({_perfectCount}) + Close({_closeCount}) + Miss({_missCount}) = {countedNotes}, but TotalNotes = {_totalNotes}");
+    }
+
     Debug.Log($"[GAME] Results saved to GameData:");
+    Debug.Log($"  - Total Notes: {GameData.TotalNotes} (Perfect: {GameData.PerfectHits}, Close: {GameData.CloseHits}, Miss: {GameData.MissedNotes})");
+    Debug.Log($"  - Extra Notes Played: {_extraNotes}, Hold Breaks: {_holdBreaks}");
     Debug.Log($"  - Max Combo: {GameData.MaxCombo}");
-    Debug.Log($"  - Total Notes: {GameData.TotalNotes}");
-    Debug.Log($"  - Perfect: {GameData.PerfectHits}, Close: {GameData.CloseHits}, Miss: {GameData.MissedNotes}");
     Debug.Log($"  - Accuracy: {GameData.GetAccuracyPercent():F1}%");
     Debug.Log($"  - Grade: {GameData.GetLetterGrade()}");
     Debug.Log($"  - Full Combo: {GameData.IsFullCombo}");
@@ -738,6 +782,7 @@ public class GameController : MonoBehaviour
     _renderStartIndexByBeat.Clear();
 
     _currentGroupHits.Clear();
+    _tentativeGroupHits.Clear();
     _groupWindowActive = false;
     _groupWindowStartTime = 0f;
     _currentNoteIndex = 0;
@@ -754,6 +799,7 @@ public class GameController : MonoBehaviour
     _perfectCount = 0;
     _closeCount = 0;
     _missCount = 0;
+    _extraNotes = 0;
     _lastHitType = HitType.None;
     _currentCombo = 0;
     _longestCombo = 0;
@@ -784,13 +830,14 @@ public class GameController : MonoBehaviour
   private void RegisterMistakeAndResetGroup(string reason)
   {
     _mistakes++;
-    _missCount++;
+    _extraNotes++; // Group reset counts as extra, not as missed expected notes
     _lastHitType = HitType.Miss;
     BreakCombo(reason);
+    _tentativeGroupHits.Clear(); // Discard any tentative hits from this group
     _currentGroupHits.Clear();
     _groupWindowActive = false;
     _groupWindowStartTime = 0f;
-    Debug.Log($"[GAME] ✗ MISS ({_missCount}): {reason}");
+    Debug.Log($"[GAME] ✗ GROUP RESET ({_extraNotes}): {reason}");
     UpdateUI();
   }
 
@@ -846,9 +893,19 @@ public class GameController : MonoBehaviour
   }
 
   /// <summary>
-  /// Records a hit and updates combo.
+  /// Records a hit and updates combo. Used for tempo mode (immediate recording).
   /// </summary>
   private void RecordHit(HitType hitType)
+  {
+    RecordHitFinal(hitType);
+    UpdateUI();
+  }
+
+  /// <summary>
+  /// Records a hit and updates combo without calling UpdateUI.
+  /// Used for finalizing tentative hits in practice mode.
+  /// </summary>
+  private void RecordHitFinal(HitType hitType)
   {
     _lastHitType = hitType;
 
@@ -870,8 +927,6 @@ public class GameController : MonoBehaviour
 
     if (_currentCombo > _longestCombo)
       _longestCombo = _currentCombo;
-
-    UpdateUI();
   }
 
   /// <summary>
@@ -970,6 +1025,7 @@ public class GameController : MonoBehaviour
     _practiceGroupArrivalIndex = -1;
 
     _currentGroupHits.Clear();
+    _tentativeGroupHits.Clear();
     _groupWindowActive = false;
     _groupWindowStartTime = 0f;
 
@@ -1234,8 +1290,8 @@ public class GameController : MonoBehaviour
         {
           ev.Broken = true;
           _holdBreaks++;
-          // Lingering past duration counts as "Close" (almost) and breaks combo
-          _closeCount++;
+          // Lingering past duration breaks combo but does NOT change the note's hit categorization
+          // The note was already counted when initially hit
           _lastHitType = HitType.Close;
           BreakCombo("Hold lingered past duration");
           Debug.Log($"[PERF] HOLD BREAK (lingered): MIDI {kvp.Key} still held at beat {nowBeat:F2}, expected end {ev.EndBeat:F2}");
@@ -1254,13 +1310,16 @@ public class GameController : MonoBehaviour
 
   private string BuildPerformanceSummary()
   {
+    int countedNotes = _perfectCount + _closeCount + _missCount;
+    string countCheck = countedNotes == _totalNotes ? "OK" : $"MISMATCH ({countedNotes} vs {_totalNotes})";
+
     if (_noteOnErrorsSeconds.Count == 0)
-      return $"Perf: no hits | Perfect: {_perfectCount}, Close: {_closeCount}, Miss: {_missCount} | Best Combo: {_longestCombo}";
+      return $"Perf: no hits | Perfect: {_perfectCount}, Close: {_closeCount}, Miss: {_missCount}, Extra: {_extraNotes} | Count: {countCheck} | Best Combo: {_longestCombo}";
 
     double avgAbs = _noteOnErrorsSeconds.Select(System.Math.Abs).Average();
     int early = _noteOnErrorsSeconds.Count(d => d < 0);
     int late = _noteOnErrorsSeconds.Count - early;
 
-    return $"Perf: avg|Δt|={avgAbs:F3}s (early={early}, late={late}), holds={_holdNotesExpected}, breaks={_holdBreaks}, missedNotes={_missedNotes} | Perfect: {_perfectCount}, Close: {_closeCount}, Miss: {_missCount} | Best Combo: {_longestCombo}";
+    return $"Perf: avg|Δt|={avgAbs:F3}s (early={early}, late={late}), holds={_holdNotesExpected}, breaks={_holdBreaks} | Perfect: {_perfectCount}, Close: {_closeCount}, Miss: {_missCount}, Extra: {_extraNotes} | Count: {countCheck} | Best Combo: {_longestCombo}";
   }
 }
