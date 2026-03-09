@@ -205,11 +205,6 @@ namespace PianoGame.UI
 
       letterGradeText.text = grade;
       letterGradeText.color = gradeColor;
-      if (grade == "S+") {
-        letterGradeText.fontSize = 200.0f;
-      } else {
-        letterGradeText.fontSize = 363.9f;
-      }
       letterGradeText.gameObject.SetActive(true);
 
       // Update background if present
